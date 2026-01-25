@@ -1,0 +1,53 @@
+name: Slugify Master CI/CD
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  backend-test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+    - name: Install dependencies
+      run: |
+        cd backend
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    - name: Run Backend (Check if starts)
+      run: |
+        cd backend
+        python main.py & 
+        sleep 5
+        curl http://localhost:8000/browse?mode=files || exit 1
+
+  frontend-build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Use Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+    - name: Install dependencies
+      run: |
+        cd frontend
+        npm install
+    - name: Build frontend
+      run: |
+        cd frontend
+        NEXT_PUBLIC_API_BASE=http://localhost:8000 npm run build
+
+  docker-build:
+    needs: [backend-test, frontend-build]
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Build Docker Compose
+      run: docker compose build
