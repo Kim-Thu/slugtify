@@ -2,6 +2,8 @@
 
 **Slugify Master** là một bộ công cụ mạnh mẽ giúp chuẩn hóa dữ liệu, bao gồm đổi tên tệp tin hàng loạt chuẩn SEO và dọn dẹp mã nguồn HTML chuyên nghiệp. Dự án được xây dựng với kiến trúc hiện đại, tuân thủ nguyên tắc SOLID và tối ưu hiệu suất tối đa.
 
+**Tiếng Việt** | [English](README_en.md)
+
 ---
 
 ## 🚀 Tính năng chính
