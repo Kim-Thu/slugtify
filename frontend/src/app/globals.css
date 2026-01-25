@@ -1,0 +1,117 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --foreground-rgb: 255, 255, 255;
+  --background-start-rgb: 8, 8, 15;
+  --background-end-rgb: 0, 0, 0;
+}
+
+body {
+  color: rgb(var(--foreground-rgb));
+  background: radial-gradient(circle at top center, rgb(15, 23, 42), rgb(var(--background-end-rgb)));
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+@layer components {
+  .glass {
+    @apply bg-white/5 backdrop-blur-xl border border-white/10 shadow-[0_8px_32px_0_rgba(0,0,0,0.37)];
+  }
+  
+  .glass-card {
+    @apply glass rounded-3xl transition-all duration-300 hover:bg-white/[0.08] hover:border-white/20 hover:shadow-2xl hover:shadow-blue-500/10;
+  }
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-4px); }
+  75% { transform: translateX(4px); }
+}
+
+.animate-shake {
+  animation: shake 0.4s ease-in-out;
+}
+
+/* Custom Scrollbar - Inset Version */
+::-webkit-scrollbar {
+  width: 14px;
+  height: 14px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 20px;
+  border: 4px solid transparent; /* Creates the inset spacing */
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+  border: 4px solid transparent;
+  background-clip: content-box;
+}
+
+/* For Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+}
+
+/* React Quill Dark Theme Adjustments */
+.quill-dark .ql-toolbar {
+  background: rgba(255, 255, 255, 0.03) !important;
+  border: none !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+  padding: 12px !important;
+}
+
+.quill-dark .ql-container {
+  border: none !important;
+  font-family: inherit !important;
+  font-size: 0.9rem !important;
+  color: #94a3b8 !important;
+}
+
+.quill-dark .ql-editor.ql-blank::before {
+  color: #475569 !important;
+  font-style: normal !important;
+}
+
+.quill-dark .ql-stroke {
+  stroke: #94a3b8 !important;
+}
+
+.quill-dark .ql-fill {
+  fill: #94a3b8 !important;
+}
+
+.quill-dark .ql-picker {
+  color: #94a3b8 !important;
+}
+
+.quill-dark .ql-editor {
+  padding: 20px !important;
+  flex-grow: 1 !important;
+  overflow-y: auto !important;
+}
+
+.quill-dark .ql-container.ql-snow {
+  border: none !important;
+  flex-grow: 1 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+}
+
+.quill-dark {
+  display: flex !important;
+  flex-direction: column !important;
+  height: 100% !important;
+}

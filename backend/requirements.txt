@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+python-slugify
+pydantic
+beautifulsoup4
+lxml
