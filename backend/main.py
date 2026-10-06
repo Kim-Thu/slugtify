@@ -7,6 +7,7 @@ import os
 from services.file_service import FileSystemService
 from services.naming_strategy import SlugNamingStrategy
 from services.html_service import HtmlCleaner
+from services.image_service import ImageConverter
 from core.security import SecurityManager
 
 app = FastAPI(title="SlugifyMaster API", version="2.0.0")
@@ -102,6 +103,48 @@ async def rename_files(request: BulkRenameRequest, service: FileSystemService = 
     safe_target = SecurityManager.validate_path(request.target_path) if request.target_path else None
     result = service.bulk_rename(safe_path, request.renames, safe_target)
     return result
+
+class ImageConvertRequest(BaseModel):
+    paths: List[str]
+    target_format: str = "webp"
+    output_dir: str = None
+    quality: int = 85
+    recursive: bool = True
+    overwrite: bool = False
+
+@app.post("/image/analyze")
+async def analyze_images(request: ImageConvertRequest):
+    try:
+        safe_paths = [SecurityManager.validate_path(p) for p in request.paths]
+        safe_output = SecurityManager.validate_path(request.output_dir) if request.output_dir else None
+        return ImageConverter.analyze(
+            safe_paths,
+            request.target_format,
+            safe_output,
+            request.recursive,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/image/convert")
+async def convert_images(request: ImageConvertRequest):
+    try:
+        safe_paths = [SecurityManager.validate_path(p) for p in request.paths]
+        safe_output = SecurityManager.validate_path(request.output_dir) if request.output_dir else None
+        return ImageConverter.convert(
+            safe_paths,
+            request.target_format,
+            safe_output,
+            request.quality,
+            request.recursive,
+            request.overwrite,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 class HtmlCleanRequest(BaseModel):
     paths: List[str]
