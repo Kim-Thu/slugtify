@@ -26,6 +26,45 @@ export const apiClient = {
     return res.json();
   },
 
+  async imageAnalyze(paths: string[], targetFormat: string, outputDir?: string, recursive: boolean = true) {
+    const res = await fetch(`${API_BASE}/image/analyze`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        paths,
+        target_format: targetFormat,
+        output_dir: outputDir || null,
+        recursive,
+      }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  async imageConvert(
+    paths: string[],
+    targetFormat: string,
+    outputDir?: string,
+    quality: number = 85,
+    recursive: boolean = true,
+    overwrite: boolean = false,
+  ) {
+    const res = await fetch(`${API_BASE}/image/convert`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        paths,
+        target_format: targetFormat,
+        output_dir: outputDir || null,
+        quality,
+        recursive,
+        overwrite,
+      }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
   async htmlAnalyze(paths: string[], options: Record<string, boolean>) {
     const res = await fetch(`${API_BASE}/html/analyze`, {
       method: "POST",
