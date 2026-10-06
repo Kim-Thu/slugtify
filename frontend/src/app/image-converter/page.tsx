@@ -71,7 +71,6 @@ export default function ImageConverterPage() {
     try {
       const result = await apiClient.imageAnalyze(paths, format, outputDir || undefined, recursive);
       setFiles(result.files || []);
-      if (!outputDir && result.output_dir) setOutputDir(result.output_dir);
       if (!result.files?.length) {
         setMessage(vi ? "Không tìm thấy ảnh được hỗ trợ." : "No supported images found.");
       }
