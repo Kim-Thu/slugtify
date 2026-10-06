@@ -6,7 +6,7 @@ import Link from "next/link";
 import { LanguageSwitcher } from "./LanguageSwitcher";
 
 export const Header = () => {
-    const { t } = useLanguage();
+    const { t, language } = useLanguage();
     return (
         <header className="fixed top-0 left-0 right-0 z-50 glass border-b border-white/10">
             <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
@@ -20,6 +20,7 @@ export const Header = () => {
                 <nav className="hidden md:flex items-center gap-8 text-sm font-medium text-gray-400">
                     <Link href="/" className="hover:text-white transition-colors cursor-pointer">{t.header.rename}</Link>
                     <Link href="/html-cleaner" className="hover:text-white transition-colors cursor-pointer">{t.header.html_cleaner}</Link>
+                    <Link href="/image-converter" className="hover:text-white transition-colors cursor-pointer">{language === "vi" ? "Đổi định dạng ảnh" : "Image Converter"}</Link>
                     <Link href="/guide" className="hover:text-white transition-colors cursor-pointer">{t.header.guide}</Link>
                     <Link href="/docs" className="hover:text-white transition-colors cursor-pointer">{t.header.docs}</Link>
                 </nav>
