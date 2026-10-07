@@ -27,6 +27,7 @@ export default function ImageConverterPage() {
   const [quality, setQuality] = useState(85);
   const [recursive, setRecursive] = useState(true);
   const [overwrite, setOverwrite] = useState(false);
+  const [deleteSource, setDeleteSource] = useState(false);
   const [files, setFiles] = useState<PreviewFile[]>([]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
@@ -93,12 +94,13 @@ export default function ImageConverterPage() {
         outputDir || undefined,
         quality,
         recursive,
-        overwrite
+        overwrite,
+        deleteSource
       );
       setMessage(
         vi
-          ? `Đã chuyển ${result.success} ảnh. Bỏ qua ${result.skipped || 0}. Lỗi ${result.errors?.length || 0}.`
-          : `Converted ${result.success} images. Skipped ${result.skipped || 0}. Errors ${result.errors?.length || 0}.`
+          ? `Đã chuyển ${result.success} ảnh. Đã xóa ảnh gốc: ${result.deleted || 0}. Bỏ qua ${result.skipped || 0}. Lỗi ${(result.errors?.length || 0) + (result.delete_errors?.length || 0)}.`
+          : `Converted ${result.success} images. Deleted originals: ${result.deleted || 0}. Skipped ${result.skipped || 0}. Errors ${(result.errors?.length || 0) + (result.delete_errors?.length || 0)}.`
       );
       await analyze();
     } catch (error: any) {
@@ -256,6 +258,14 @@ export default function ImageConverterPage() {
               onChange={(e) => setOverwrite(e.target.checked)}
             />
             {vi ? "Ghi đè nếu file đích đã tồn tại" : "Overwrite existing output"}
+          </label>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={deleteSource}
+              onChange={(e) => setDeleteSource(e.target.checked)}
+            />
+            {vi ? "Xóa ảnh gốc sau khi chuyển đổi thành công" : "Delete source images after successful conversion"}
           </label>
         </div>
 
