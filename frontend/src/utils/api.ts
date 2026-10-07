@@ -48,6 +48,7 @@ export const apiClient = {
     quality: number = 85,
     recursive: boolean = true,
     overwrite: boolean = false,
+    deleteSource: boolean = false,
   ) {
     const res = await fetch(`${API_BASE}/image/convert`, {
       method: "POST",
@@ -59,6 +60,7 @@ export const apiClient = {
         quality,
         recursive,
         overwrite,
+        delete_source: deleteSource,
       }),
     });
     if (!res.ok) throw new Error(await res.text());
