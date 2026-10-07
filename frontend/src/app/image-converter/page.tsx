@@ -102,7 +102,11 @@ export default function ImageConverterPage() {
           ? `Đã chuyển ${result.success} ảnh. Đã xóa ảnh gốc: ${result.deleted || 0}. Bỏ qua ${result.skipped || 0}. Lỗi ${(result.errors?.length || 0) + (result.delete_errors?.length || 0)}.`
           : `Converted ${result.success} images. Deleted originals: ${result.deleted || 0}. Skipped ${result.skipped || 0}. Errors ${(result.errors?.length || 0) + (result.delete_errors?.length || 0)}.`
       );
-      await analyze();
+      if (deleteSource) {
+        setFiles([]);
+      } else {
+        await analyze();
+      }
     } catch (error: any) {
       setMessage(error?.message || (vi ? "Chuyển đổi thất bại." : "Conversion failed."));
     } finally {
@@ -265,7 +269,12 @@ export default function ImageConverterPage() {
               checked={deleteSource}
               onChange={(e) => setDeleteSource(e.target.checked)}
             />
-            {vi ? "Xóa ảnh gốc sau khi chuyển đổi thành công" : "Delete source images after successful conversion"}
+            <span>
+              {vi ? "Xóa ảnh gốc sau khi chuyển đổi thành công" : "Delete source images after successful conversion"}
+              <span className="block text-[11px] text-amber-400/80">
+                {vi ? "Chỉ xóa file đã chuyển đổi thành công." : "Only successfully converted source files are deleted."}
+              </span>
+            </span>
           </label>
         </div>
 
