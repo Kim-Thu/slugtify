@@ -43,18 +43,20 @@ type StyledCheckboxProps = {
   checked: boolean;
   onChange: (checked: boolean) => void | Promise<void>;
   label: React.ReactNode;
+  disabled?: boolean;
 };
 
 const IMAGE_PATTERN = /\.(png|jpe?g|webp|bmp|tiff?)$/i;
 const WRITABLE_FORMATS = ["webp", "jpg", "png"];
 
-function StyledCheckbox({ checked, onChange, label }: StyledCheckboxProps) {
+function StyledCheckbox({ checked, onChange, label, disabled = false }: StyledCheckboxProps) {
   return (
-    <label className="group flex cursor-pointer items-start gap-2.5 select-none">
+    <label className={`group flex items-start gap-2.5 select-none ${disabled ? "cursor-not-allowed opacity-40" : "cursor-pointer"}`}>
       <input
         type="checkbox"
         checked={checked}
-        onChange={(event) => onChange(event.target.checked)}
+        onChange={(event) => !disabled && onChange(event.target.checked)}
+        disabled={disabled}
         className="sr-only"
       />
       <span
@@ -79,6 +81,7 @@ export default function ImageConverterPage() {
   const [items, setItems] = useState<SelectedImage[]>([]);
   const [sourceDir, setSourceDir] = useState<AnyDirectoryHandle | null>(null);
   const [outputDir, setOutputDir] = useState<AnyDirectoryHandle | null>(null);
+  const [destinationMode, setDestinationMode] = useState<"downloads" | "folder">("downloads");
   const [format, setFormat] = useState("webp");
   const [formatOpen, setFormatOpen] = useState(false);
   const formatDropdownRef = useRef<HTMLDivElement | null>(null);
@@ -133,6 +136,19 @@ export default function ImageConverterPage() {
   };
 
   const getExt = (target: string) => target === "jpg" ? ".jpg" : `.${target}`;
+
+  const saveToDownloads = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.style.display = "none";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+
+    window.setTimeout(() => URL.revokeObjectURL(url), 30000);
+  };
 
   const buildPreview = (nextItems: SelectedImage[], nextFormat = format) => {
     const ext = getExt(nextFormat);
@@ -228,7 +244,6 @@ export default function ImageConverterPage() {
 
       const selected = await scanDirectory(dir, recursive);
       setSourceDir(dir);
-      setOutputDir(null);
       setItems(selected);
       buildPreview(selected);
       if (!selected.length) {
@@ -300,13 +315,6 @@ export default function ImageConverterPage() {
   const chooseOutput = async () => {
     setMessage("");
 
-    toast(
-      vi
-        ? "Hãy chọn hoặc tạo một thư mục con, ví dụ Downloads/SlugifyMaster. Chrome/Edge có thể chặn thư mục hệ thống hoặc thư mục gốc."
-        : "Choose or create a subfolder such as Downloads/SlugifyMaster. Chrome/Edge may block system or root folders.",
-      { icon: "📁", duration: 5000 }
-    );
-
     try {
       const w = ensureSupportedBrowser();
       const dir = await w.showDirectoryPicker({
@@ -324,6 +332,7 @@ export default function ImageConverterPage() {
         );
       }
 
+      setDestinationMode("folder");
       setOutputDir(dir);
       toast.success(
         vi ? `Đã chọn thư mục đích: ${dir.name}` : `Output folder selected: ${dir.name}`
@@ -392,6 +401,10 @@ export default function ImageConverterPage() {
   };
 
   const getOutputParent = async (item: SelectedImage): Promise<AnyDirectoryHandle> => {
+    if (destinationMode === "downloads") {
+      throw new Error("DOWNLOADS_MODE");
+    }
+
     if (outputDir) {
       let current = outputDir;
       const parts = item.relativePath.split("/").slice(0, -1);
@@ -424,13 +437,37 @@ export default function ImageConverterPage() {
     let errors = 0;
 
     try {
+      if (destinationMode === "downloads" && items.length > 1) {
+        toast(
+          vi
+            ? "Chrome/Edge có thể hỏi quyền tải nhiều file một lần cho site này. Chọn Allow nếu được hỏi."
+            : "Chrome/Edge may ask once for permission to download multiple files from this site. Choose Allow if prompted.",
+          { icon: "⬇️", duration: 5000 }
+        );
+      }
+
       for (let index = 0; index < items.length; index += 1) {
         const item = items[index];
         updateQueueItem(index, { status: "processing", progress: 10 });
 
         try {
-          const parent = await getOutputParent(item);
           const outputName = item.file.name.replace(/\.[^.]+$/, "") + getExt(format);
+
+          updateQueueItem(index, { progress: 35 });
+          const blob = await canvasConvert(item.file, format, quality);
+
+          if (destinationMode === "downloads") {
+            updateQueueItem(index, { progress: 80 });
+            saveToDownloads(blob, outputName);
+            success += 1;
+            updateQueueItem(index, { status: "success", progress: 100 });
+
+            // Let the browser process each download request before starting the next one.
+            await new Promise((resolve) => window.setTimeout(resolve, 120));
+            continue;
+          }
+
+          const parent = await getOutputParent(item);
 
           if (!overwrite) {
             try {
@@ -442,9 +479,6 @@ export default function ImageConverterPage() {
               // Output does not exist.
             }
           }
-
-          updateQueueItem(index, { progress: 35 });
-          const blob = await canvasConvert(item.file, format, quality);
 
           updateQueueItem(index, { progress: 70 });
           const outHandle = await parent.getFileHandle(outputName, { create: true });
@@ -477,9 +511,13 @@ export default function ImageConverterPage() {
       }
 
       const summary =
-        vi
-          ? `Hoàn tất ${success}/${items.length} ảnh. Đã xóa ảnh gốc: ${deleted}. Bỏ qua: ${skipped}. Lỗi: ${errors}.`
-          : `Completed ${success}/${items.length} images. Deleted originals: ${deleted}. Skipped: ${skipped}. Errors: ${errors}.`;
+        destinationMode === "downloads"
+          ? (vi
+              ? `Đã gửi ${success}/${items.length} ảnh tới Downloads. Lỗi: ${errors}.`
+              : `Sent ${success}/${items.length} images to Downloads. Errors: ${errors}.`)
+          : (vi
+              ? `Hoàn tất ${success}/${items.length} ảnh. Đã xóa ảnh gốc: ${deleted}. Bỏ qua: ${skipped}. Lỗi: ${errors}.`
+              : `Completed ${success}/${items.length} images. Deleted originals: ${deleted}. Skipped: ${skipped}. Errors: ${errors}.`);
 
       setMessage(summary);
 
@@ -681,24 +719,69 @@ export default function ImageConverterPage() {
           </div>
         </div>
 
-        <div className="space-y-2">
-          <label className="text-xs font-bold uppercase text-gray-500">{vi ? "Thư mục đích" : "Output folder"}</label>
-          <div className="glass h-[50px] rounded-xl flex items-center gap-2 bg-white/5 px-2">
-            <input
-              readOnly
-              value={outputDir?.name || ""}
-              placeholder={vi ? "Ví dụ: Downloads/SlugifyMaster" : "Example: Downloads/SlugifyMaster"}
-              className="min-w-0 flex-1 bg-transparent px-3 text-xs font-mono outline-none"
-            />
-            <button onClick={chooseOutput} className="h-9 px-4 rounded-lg bg-blue-600 hover:bg-blue-500 text-xs font-bold transition-colors">
-              {vi ? "Chọn thư mục con" : "Choose subfolder"}
+        <div className="space-y-3">
+          <label className="text-xs font-bold uppercase text-gray-500">{vi ? "Đích lưu file" : "Save destination"}</label>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 rounded-xl border border-white/10 bg-black/20 p-1.5">
+            <button
+              type="button"
+              onClick={() => {
+                setDestinationMode("downloads");
+                setDeleteSource(false);
+                setOverwrite(false);
+                setMessage("");
+              }}
+              className={
+                "rounded-lg px-4 py-3 text-left transition-all " +
+                (destinationMode === "downloads"
+                  ? "bg-blue-500/15 text-blue-300 ring-1 ring-blue-500/20"
+                  : "text-gray-400 hover:bg-white/[0.05] hover:text-white")
+              }
+            >
+              <span className="block text-sm font-semibold">{vi ? "Downloads" : "Downloads"}</span>
+              <span className="mt-1 block text-[11px] text-gray-500">
+                {vi ? "Lưu trực tiếp bằng cơ chế download của browser, không upload server." : "Save through the browser locally, with no server upload."}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setDestinationMode("folder")}
+              className={
+                "rounded-lg px-4 py-3 text-left transition-all " +
+                (destinationMode === "folder"
+                  ? "bg-violet-500/15 text-violet-300 ring-1 ring-violet-500/20"
+                  : "text-gray-400 hover:bg-white/[0.05] hover:text-white")
+              }
+            >
+              <span className="block text-sm font-semibold">{vi ? "Thư mục tùy chọn" : "Custom folder"}</span>
+              <span className="mt-1 block text-[11px] text-gray-500">
+                {vi ? "Có quyền ghi trực tiếp, ghi đè và xóa ảnh gốc." : "Direct write access with overwrite and source deletion."}
+              </span>
             </button>
           </div>
-          <p className="text-[11px] leading-5 text-gray-500">
-            {vi
-              ? "Chrome/Edge không cho website ghi trực tiếp vào một số thư mục hệ thống hoặc thư mục gốc. Hãy chọn/tạo thư mục con, ví dụ Downloads/SlugifyMaster."
-              : "Chrome/Edge blocks direct write access to some system or root folders. Choose/create a subfolder, for example Downloads/SlugifyMaster."}
-          </p>
+
+          {destinationMode === "folder" && (
+            <div className="glass h-[50px] rounded-xl flex items-center gap-2 bg-white/5 px-2">
+              <input
+                readOnly
+                value={outputDir?.name || ""}
+                placeholder={vi ? "Chưa chọn thư mục đích" : "No output folder selected"}
+                className="min-w-0 flex-1 bg-transparent px-3 text-xs font-mono outline-none"
+              />
+              <button onClick={chooseOutput} className="h-9 px-4 rounded-lg bg-blue-600 hover:bg-blue-500 text-xs font-bold transition-colors">
+                {vi ? "Chọn thư mục" : "Choose folder"}
+              </button>
+            </div>
+          )}
+
+          {destinationMode === "downloads" && (
+            <p className="text-[11px] leading-5 text-gray-500">
+              {vi
+                ? "Ảnh được xử lý hoàn toàn trên máy rồi browser lưu vào Downloads mặc định. Không có dữ liệu ảnh nào được gửi qua mạng."
+                : "Images are processed entirely on your device and then saved to the browser's default Downloads folder. No image data is sent over the network."}
+            </p>
+          )}
         </div>
 
         <div className="flex flex-wrap items-start gap-x-7 gap-y-4">
@@ -714,17 +797,27 @@ export default function ImageConverterPage() {
           <StyledCheckbox
             checked={overwrite}
             onChange={setOverwrite}
-            label={vi ? "Ghi đè nếu file đích đã tồn tại" : "Overwrite existing output"}
+            disabled={destinationMode === "downloads"}
+            label={
+              destinationMode === "downloads"
+                ? (vi ? "Ghi đè (không khả dụng với Downloads)" : "Overwrite (unavailable for Downloads)")
+                : (vi ? "Ghi đè nếu file đích đã tồn tại" : "Overwrite existing output")
+            }
           />
 
           <StyledCheckbox
             checked={deleteSource}
             onChange={setDeleteSource}
+            disabled={destinationMode === "downloads"}
             label={
               <span>
-                {vi ? "Xóa ảnh gốc sau khi chuyển đổi thành công" : "Delete source images after successful conversion"}
+                {destinationMode === "downloads"
+                  ? (vi ? "Xóa ảnh gốc (không khả dụng với Downloads)" : "Delete source images (unavailable for Downloads)")
+                  : (vi ? "Xóa ảnh gốc sau khi chuyển đổi thành công" : "Delete source images after successful conversion")}
                 <span className="block text-[11px] text-amber-400/80">
-                  {vi ? "Chỉ xóa sau khi file mới đã ghi thành công." : "Only deletes after the new file is written successfully."}
+                  {destinationMode === "downloads"
+                    ? (vi ? "Browser không cung cấp xác nhận ghi file xuống disk để xóa nguồn an toàn." : "The browser does not expose a reliable disk-write completion signal for safe source deletion.")
+                    : (vi ? "Chỉ xóa sau khi file mới đã ghi thành công." : "Only deletes after the new file is written successfully.")}
                 </span>
               </span>
             }
