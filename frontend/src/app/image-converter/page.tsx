@@ -4,7 +4,16 @@ import { GlassCard } from "@/components/GlassCard";
 import { PageWrapper } from "@/components/PageWrapper";
 import { SectionHeader } from "@/components/SectionHeader";
 import { useLanguage } from "@/hooks/useLanguage";
-import { FileImage, FolderOpen, Images, RefreshCw } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  CircleAlert,
+  FileImage,
+  FolderOpen,
+  Images,
+  LoaderCircle,
+  RefreshCw,
+} from "lucide-react";
 import { useMemo, useState } from "react";
 
 type AnyFileHandle = any;
@@ -17,15 +26,50 @@ type SelectedImage = {
   relativePath: string;
 };
 
+type QueueStatus = "waiting" | "processing" | "success" | "skipped" | "error";
+
 type PreviewFile = {
   source: string;
   filename: string;
   output_filename: string;
   size: number;
+  status: QueueStatus;
+  progress: number;
+  error?: string;
+};
+
+type StyledCheckboxProps = {
+  checked: boolean;
+  onChange: (checked: boolean) => void | Promise<void>;
+  label: React.ReactNode;
 };
 
 const IMAGE_PATTERN = /\.(png|jpe?g|webp|bmp|tiff?)$/i;
 const WRITABLE_FORMATS = ["webp", "jpg", "png"];
+
+function StyledCheckbox({ checked, onChange, label }: StyledCheckboxProps) {
+  return (
+    <label className="group flex cursor-pointer items-start gap-2.5 select-none">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+        className="sr-only"
+      />
+      <span
+        className={
+          "mt-0.5 flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px] border transition-all " +
+          (checked
+            ? "border-blue-500 bg-blue-500 shadow-[0_0_0_3px_rgba(59,130,246,0.12)]"
+            : "border-white/20 bg-white/[0.05] group-hover:border-white/35 group-hover:bg-white/[0.08]")
+        }
+      >
+        {checked && <Check className="h-3 w-3 stroke-[3] text-white" />}
+      </span>
+      <span className="text-sm leading-5 text-gray-300 group-hover:text-white">{label}</span>
+    </label>
+  );
+}
 
 export default function ImageConverterPage() {
   const { language } = useLanguage();
@@ -35,6 +79,7 @@ export default function ImageConverterPage() {
   const [sourceDir, setSourceDir] = useState<AnyDirectoryHandle | null>(null);
   const [outputDir, setOutputDir] = useState<AnyDirectoryHandle | null>(null);
   const [format, setFormat] = useState("webp");
+  const [formatOpen, setFormatOpen] = useState(false);
   const [quality, setQuality] = useState(85);
   const [recursive, setRecursive] = useState(true);
   const [overwrite, setOverwrite] = useState(false);
@@ -44,6 +89,17 @@ export default function ImageConverterPage() {
   const [message, setMessage] = useState("");
 
   const totalSize = useMemo(() => files.reduce((sum, file) => sum + file.size, 0), [files]);
+  const completedCount = useMemo(
+    () => files.filter((file) => ["success", "skipped", "error"].includes(file.status)).length,
+    [files]
+  );
+  const successCount = useMemo(() => files.filter((file) => file.status === "success").length, [files]);
+  const skippedCount = useMemo(() => files.filter((file) => file.status === "skipped").length, [files]);
+  const errorCount = useMemo(() => files.filter((file) => file.status === "error").length, [files]);
+  const overallProgress = useMemo(() => {
+    if (!files.length) return 0;
+    return Math.round(files.reduce((sum, file) => sum + file.progress, 0) / files.length);
+  }, [files]);
 
   const formatBytes = (bytes: number) => {
     if (!bytes) return "0 B";
@@ -61,12 +117,17 @@ export default function ImageConverterPage() {
       filename: item.file.name,
       output_filename: item.file.name.replace(/\.[^.]+$/, "") + ext,
       size: item.file.size,
+      status: "waiting",
+      progress: 0,
     })));
+  };
+
+  const updateQueueItem = (index: number, patch: Partial<PreviewFile>) => {
+    setFiles((current) => current.map((file, i) => i === index ? { ...file, ...patch } : file));
   };
 
   const scanDirectory = async (
     dir: AnyDirectoryHandle,
-    rootName: string,
     includeSubfolders: boolean,
     prefix = ""
   ): Promise<SelectedImage[]> => {
@@ -83,7 +144,7 @@ export default function ImageConverterPage() {
         });
       } else if (handle.kind === "directory" && includeSubfolders) {
         const nestedPrefix = prefix ? `${prefix}/${name}` : name;
-        result.push(...await scanDirectory(handle, rootName, true, nestedPrefix));
+        result.push(...await scanDirectory(handle, true, nestedPrefix));
       }
     }
 
@@ -107,8 +168,9 @@ export default function ImageConverterPage() {
     try {
       const w = ensureSupportedBrowser();
       const dir = await w.showDirectoryPicker({ mode: "readwrite" });
-      const selected = await scanDirectory(dir, dir.name, recursive);
+      const selected = await scanDirectory(dir, recursive);
       setSourceDir(dir);
+      setOutputDir(null);
       setItems(selected);
       buildPreview(selected);
       if (!selected.length) {
@@ -160,8 +222,11 @@ export default function ImageConverterPage() {
   };
 
   const refreshFolder = async (nextRecursive = recursive) => {
-    if (!sourceDir) return;
-    const selected = await scanDirectory(sourceDir, sourceDir.name, nextRecursive);
+    if (!sourceDir) {
+      buildPreview(items);
+      return;
+    }
+    const selected = await scanDirectory(sourceDir, nextRecursive);
     setItems(selected);
     buildPreview(selected);
   };
@@ -170,8 +235,8 @@ export default function ImageConverterPage() {
     if (!WRITABLE_FORMATS.includes(targetFormat)) {
       throw new Error(
         vi
-          ? `Trình duyệt không thể ghi trực tiếp định dạng ${targetFormat.toUpperCase()} mà không dùng thư viện bổ sung.`
-          : `The browser cannot write ${targetFormat.toUpperCase()} directly without an additional codec.`
+          ? `Trình duyệt chưa có encoder ${targetFormat.toUpperCase()}.`
+          : `The browser does not have a ${targetFormat.toUpperCase()} encoder.`
       );
     }
 
@@ -186,6 +251,7 @@ export default function ImageConverterPage() {
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
     }
+
     ctx.drawImage(bitmap, 0, 0);
     bitmap.close();
 
@@ -215,21 +281,14 @@ export default function ImageConverterPage() {
       return current;
     }
 
-    if (item.parent) {
-      return item.parent;
-    }
-
+    if (item.parent) return item.parent;
     if (sourceDir) return sourceDir;
 
-    if (!outputDir) {
-      throw new Error(
-        vi
-          ? "Khi chọn từng file riêng lẻ, hãy chọn thư mục đích để trình duyệt có quyền ghi file."
-          : "When selecting individual files, choose an output folder so the browser has write permission."
-      );
-    }
-
-    return outputDir;
+    throw new Error(
+      vi
+        ? "Khi chọn từng file riêng lẻ, hãy chọn thư mục đích để trình duyệt có quyền ghi file."
+        : "When selecting individual files, choose an output folder so the browser has write permission."
+    );
   };
 
   const convert = async () => {
@@ -237,16 +296,19 @@ export default function ImageConverterPage() {
 
     setLoading(true);
     setMessage("");
+    setFiles((current) => current.map((file) => ({ ...file, status: "waiting", progress: 0, error: undefined })));
 
     let success = 0;
     let skipped = 0;
     let deleted = 0;
-    const errors: string[] = [];
+    let errors = 0;
 
     try {
-      for (const item of items) {
+      for (let index = 0; index < items.length; index += 1) {
+        const item = items[index];
+        updateQueueItem(index, { status: "processing", progress: 10 });
+
         try {
-          const blob = await canvasConvert(item.file, format, quality);
           const parent = await getOutputParent(item);
           const outputName = item.file.name.replace(/\.[^.]+$/, "") + getExt(format);
 
@@ -254,49 +316,91 @@ export default function ImageConverterPage() {
             try {
               await parent.getFileHandle(outputName);
               skipped += 1;
+              updateQueueItem(index, { status: "skipped", progress: 100 });
               continue;
             } catch {
-              // File does not exist; safe to create.
+              // Output does not exist.
             }
           }
 
+          updateQueueItem(index, { progress: 35 });
+          const blob = await canvasConvert(item.file, format, quality);
+
+          updateQueueItem(index, { progress: 70 });
           const outHandle = await parent.getFileHandle(outputName, { create: true });
           const writable = await outHandle.createWritable();
           await writable.write(blob);
           await writable.close();
-          success += 1;
+
+          updateQueueItem(index, { progress: 90 });
 
           if (deleteSource && outputName !== item.file.name) {
-            try {
-              if (item.parent) {
-                await item.parent.removeEntry(item.file.name);
-                deleted += 1;
-              } else if (typeof item.handle?.remove === "function") {
-                await item.handle.remove();
-                deleted += 1;
-              }
-            } catch (deleteError: any) {
-              errors.push(`${item.file.name}: ${deleteError?.message || deleteError}`);
+            if (item.parent) {
+              await item.parent.removeEntry(item.file.name);
+              deleted += 1;
+            } else if (typeof item.handle?.remove === "function") {
+              await item.handle.remove();
+              deleted += 1;
             }
           }
+
+          success += 1;
+          updateQueueItem(index, { status: "success", progress: 100 });
         } catch (error: any) {
-          errors.push(`${item.file.name}: ${error?.message || error}`);
+          errors += 1;
+          updateQueueItem(index, {
+            status: "error",
+            progress: 100,
+            error: error?.message || String(error),
+          });
         }
       }
 
       setMessage(
         vi
-          ? `Đã chuyển ${success} ảnh. Đã xóa ảnh gốc: ${deleted}. Bỏ qua: ${skipped}. Lỗi: ${errors.length}.`
-          : `Converted ${success} images. Deleted originals: ${deleted}. Skipped: ${skipped}. Errors: ${errors.length}.`
+          ? `Hoàn tất ${success}/${items.length} ảnh. Đã xóa ảnh gốc: ${deleted}. Bỏ qua: ${skipped}. Lỗi: ${errors}.`
+          : `Completed ${success}/${items.length} images. Deleted originals: ${deleted}. Skipped: ${skipped}. Errors: ${errors}.`
       );
-
-      if (sourceDir) {
-        await refreshFolder(recursive);
-      }
     } finally {
       setLoading(false);
     }
   };
+
+  const statusLabel = (status: QueueStatus) => {
+    if (vi) {
+      return {
+        waiting: "Chờ",
+        processing: "Đang chuyển",
+        success: "Hoàn tất",
+        skipped: "Bỏ qua",
+        error: "Lỗi",
+      }[status];
+    }
+
+    return {
+      waiting: "Waiting",
+      processing: "Processing",
+      success: "Done",
+      skipped: "Skipped",
+      error: "Error",
+    }[status];
+  };
+
+  const statusClass = (status: QueueStatus) => ({
+    waiting: "border-white/10 bg-white/[0.04] text-gray-400",
+    processing: "border-blue-500/20 bg-blue-500/10 text-blue-300",
+    success: "border-emerald-500/20 bg-emerald-500/10 text-emerald-300",
+    skipped: "border-amber-500/20 bg-amber-500/10 text-amber-300",
+    error: "border-red-500/20 bg-red-500/10 text-red-300",
+  }[status]);
+
+  const formatOptions = [
+    { value: "webp", label: "WEBP" },
+    { value: "jpg", label: "JPG" },
+    { value: "png", label: "PNG" },
+    { value: "bmp", label: "BMP", disabled: true },
+    { value: "tiff", label: "TIFF", disabled: true },
+  ];
 
   return (
     <PageWrapper maxWidth="max-w-6xl">
@@ -341,102 +445,148 @@ export default function ImageConverterPage() {
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
           <div className="lg:col-span-2 space-y-2">
             <label className="text-xs font-bold uppercase text-gray-500">{vi ? "Nguồn" : "Source"}</label>
-            <div className="glass p-2 rounded-xl flex gap-2 bg-white/5">
+            <div className="glass h-[50px] rounded-xl flex items-center gap-2 bg-white/5 px-2">
               <input
                 readOnly
                 value={sourceDir?.name || (items.length ? `${items.length} file(s)` : "")}
                 placeholder={vi ? "Chưa chọn ảnh" : "No images selected"}
-                className="flex-1 bg-transparent px-3 py-2 outline-none text-xs font-mono truncate"
+                className="min-w-0 flex-1 bg-transparent px-3 text-xs font-mono outline-none"
               />
-              <button onClick={chooseFolder} className="px-4 rounded-lg bg-white/10 hover:bg-white/20 text-xs font-bold">
+              <button onClick={chooseFolder} className="h-9 px-4 rounded-lg bg-white/10 hover:bg-white/20 text-xs font-bold transition-colors">
                 {vi ? "Chọn" : "Browse"}
               </button>
             </div>
           </div>
 
-          <div className="space-y-2">
+          <div className="relative space-y-2">
             <label className="text-xs font-bold uppercase text-gray-500">{vi ? "Định dạng đích" : "Target format"}</label>
-            <select
-              value={format}
-              onChange={(e) => {
-                const next = e.target.value;
-                setFormat(next);
-                buildPreview(items, next);
-              }}
-              className="w-full glass bg-black/30 rounded-xl px-4 py-3 outline-none"
+            <button
+              type="button"
+              onClick={() => setFormatOpen((open) => !open)}
+              className="flex h-[50px] w-full items-center justify-between rounded-xl border border-white/10 bg-white/[0.045] px-4 text-sm font-medium text-white outline-none transition-colors hover:bg-white/[0.07]"
             >
-              <option value="webp">WEBP</option>
-              <option value="jpg">JPG</option>
-              <option value="png">PNG</option>
-              <option value="bmp" disabled>BMP (codec required)</option>
-              <option value="tiff" disabled>TIFF (codec required)</option>
-            </select>
+              <span>{format.toUpperCase()}</span>
+              <ChevronDown className={`h-4 w-4 text-gray-500 transition-transform ${formatOpen ? "rotate-180" : ""}`} />
+            </button>
+
+            {formatOpen && (
+              <div className="absolute left-0 right-0 top-[76px] z-30 overflow-hidden rounded-xl border border-white/10 bg-[#171a24] p-1.5 shadow-2xl shadow-black/50">
+                {formatOptions.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    disabled={option.disabled}
+                    onClick={() => {
+                      if (option.disabled) return;
+                      setFormat(option.value);
+                      buildPreview(items, option.value);
+                      setFormatOpen(false);
+                    }}
+                    className={
+                      "flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm transition-colors " +
+                      (option.disabled
+                        ? "cursor-not-allowed text-gray-600"
+                        : option.value === format
+                          ? "bg-blue-500/15 text-blue-300"
+                          : "text-gray-300 hover:bg-white/[0.07] hover:text-white")
+                    }
+                  >
+                    <span>{option.label}{option.disabled ? " · codec required" : ""}</span>
+                    {option.value === format && !option.disabled && <Check className="h-4 w-4" />}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="space-y-2">
             <label className="text-xs font-bold uppercase text-gray-500">{vi ? "Chất lượng" : "Quality"}: {quality}</label>
-            <input
-              type="range"
-              min="1"
-              max="100"
-              value={quality}
-              onChange={(e) => setQuality(Number(e.target.value))}
-              className="w-full mt-4"
-              disabled={!["jpg", "webp"].includes(format)}
-            />
+            <div className="flex h-[50px] items-center">
+              <input
+                type="range"
+                min="1"
+                max="100"
+                value={quality}
+                onChange={(e) => setQuality(Number(e.target.value))}
+                className="w-full accent-blue-500"
+                disabled={!["jpg", "webp"].includes(format)}
+              />
+            </div>
           </div>
         </div>
 
         <div className="space-y-2">
           <label className="text-xs font-bold uppercase text-gray-500">{vi ? "Thư mục đích" : "Output folder"}</label>
-          <div className="glass p-2 rounded-xl flex gap-2 bg-white/5">
+          <div className="glass h-[50px] rounded-xl flex items-center gap-2 bg-white/5 px-2">
             <input
               readOnly
               value={outputDir?.name || ""}
               placeholder={vi ? "Để trống: ghi cạnh file gốc khi có quyền" : "Empty: write beside source when permitted"}
-              className="flex-1 bg-transparent px-3 py-2 outline-none text-xs font-mono truncate"
+              className="min-w-0 flex-1 bg-transparent px-3 text-xs font-mono outline-none"
             />
-            <button onClick={chooseOutput} className="px-4 rounded-lg bg-blue-600 hover:bg-blue-500 text-xs font-bold">
+            <button onClick={chooseOutput} className="h-9 px-4 rounded-lg bg-blue-600 hover:bg-blue-500 text-xs font-bold transition-colors">
               {vi ? "Chọn đích" : "Browse"}
             </button>
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-6 text-sm text-gray-300">
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={recursive}
-              onChange={async (e) => {
-                const next = e.target.checked;
-                setRecursive(next);
-                if (sourceDir) await refreshFolder(next);
-              }}
-            />
-            {vi ? "Quét thư mục con" : "Include subfolders"}
-          </label>
+        <div className="flex flex-wrap items-start gap-x-7 gap-y-4">
+          <StyledCheckbox
+            checked={recursive}
+            onChange={async (next) => {
+              setRecursive(next);
+              if (sourceDir) await refreshFolder(next);
+            }}
+            label={vi ? "Quét thư mục con" : "Include subfolders"}
+          />
 
-          <label className="flex items-center gap-2">
-            <input type="checkbox" checked={overwrite} onChange={(e) => setOverwrite(e.target.checked)} />
-            {vi ? "Ghi đè nếu file đích đã tồn tại" : "Overwrite existing output"}
-          </label>
+          <StyledCheckbox
+            checked={overwrite}
+            onChange={setOverwrite}
+            label={vi ? "Ghi đè nếu file đích đã tồn tại" : "Overwrite existing output"}
+          />
 
-          <label className="flex items-center gap-2">
-            <input type="checkbox" checked={deleteSource} onChange={(e) => setDeleteSource(e.target.checked)} />
-            <span>
-              {vi ? "Xóa ảnh gốc sau khi chuyển đổi thành công" : "Delete source images after successful conversion"}
-              <span className="block text-[11px] text-amber-400/80">
-                {vi ? "Chỉ xóa sau khi file mới đã ghi thành công." : "Only deletes after the new file is written successfully."}
+          <StyledCheckbox
+            checked={deleteSource}
+            onChange={setDeleteSource}
+            label={
+              <span>
+                {vi ? "Xóa ảnh gốc sau khi chuyển đổi thành công" : "Delete source images after successful conversion"}
+                <span className="block text-[11px] text-amber-400/80">
+                  {vi ? "Chỉ xóa sau khi file mới đã ghi thành công." : "Only deletes after the new file is written successfully."}
+                </span>
               </span>
-            </span>
-          </label>
+            }
+          />
         </div>
+
+        {files.length > 0 && (
+          <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm">
+              <div className="font-medium text-white">
+                {loading
+                  ? (vi ? `Đang xử lý ${completedCount}/${files.length} ảnh` : `Processing ${completedCount}/${files.length} images`)
+                  : (vi ? `Tổng cộng ${files.length} ảnh cần chuyển đổi` : `${files.length} images queued`)}
+              </div>
+              <div className="text-xs text-gray-400">
+                {successCount} {vi ? "hoàn tất" : "done"} · {skippedCount} {vi ? "bỏ qua" : "skipped"} · {errorCount} {vi ? "lỗi" : "errors"}
+              </div>
+            </div>
+            <div className="h-2 overflow-hidden rounded-full bg-white/[0.07]">
+              <div
+                className="h-full rounded-full bg-blue-500 transition-[width] duration-300"
+                style={{ width: `${overallProgress}%` }}
+              />
+            </div>
+            <div className="mt-2 text-right text-[11px] font-mono text-gray-500">{overallProgress}%</div>
+          </div>
+        )}
 
         <div className="flex flex-wrap gap-3">
           <button
             onClick={() => sourceDir ? refreshFolder(recursive) : buildPreview(items)}
             disabled={loading || !items.length}
-            className="px-6 py-3 rounded-xl bg-white/10 hover:bg-white/20 disabled:opacity-50 font-bold flex items-center gap-2"
+            className="h-12 px-6 rounded-xl bg-white/10 hover:bg-white/20 disabled:opacity-50 font-bold flex items-center gap-2 transition-colors"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
             {vi ? "Làm mới" : "Refresh"}
@@ -445,9 +595,9 @@ export default function ImageConverterPage() {
           <button
             onClick={convert}
             disabled={loading || !files.length}
-            className="px-6 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 font-bold"
+            className="h-12 px-6 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 font-bold transition-colors"
           >
-            {loading ? (vi ? "Đang xử lý..." : "Processing...") : (vi ? "Chuyển đổi tất cả" : "Convert all")}
+            {loading ? (vi ? "Đang chuyển đổi..." : "Converting...") : (vi ? `Chuyển đổi ${files.length} ảnh` : `Convert ${files.length} images`)}
           </button>
         </div>
 
@@ -460,31 +610,77 @@ export default function ImageConverterPage() {
         <GlassCard className="p-0 overflow-hidden">
           <div className="p-4 border-b border-white/10 bg-white/5 flex flex-wrap justify-between gap-3">
             <span className="text-sm text-gray-400">
-              {vi ? "Ảnh tìm thấy" : "Images found"}: <strong className="text-white">{files.length}</strong>
+              {vi ? "Danh sách chuyển đổi" : "Conversion queue"}: <strong className="text-white">{files.length}</strong>
               {" · "}{formatBytes(totalSize)}
+            </span>
+            <span className="text-xs text-gray-500">
+              {completedCount}/{files.length} {vi ? "đã xử lý" : "processed"}
             </span>
           </div>
 
-          <div className="overflow-auto max-h-[520px]">
+          <div className="overflow-auto max-h-[560px]">
             <table className="w-full text-left">
-              <thead className="sticky top-0 bg-black/90 text-xs uppercase text-gray-500">
+              <thead className="sticky top-0 z-10 bg-[#0c0e14] text-[11px] uppercase tracking-wider text-gray-500">
                 <tr>
                   <th className="px-5 py-4">{vi ? "Ảnh gốc" : "Source"}</th>
                   <th className="px-5 py-4">{vi ? "Kích thước" : "Size"}</th>
                   <th className="px-5 py-4">{vi ? "File mới" : "Output"}</th>
+                  <th className="px-5 py-4 min-w-[220px]">{vi ? "Tiến độ" : "Progress"}</th>
+                  <th className="px-5 py-4">{vi ? "Trạng thái" : "Status"}</th>
                 </tr>
               </thead>
+
               <tbody className="divide-y divide-white/5">
-                {files.map((file) => (
-                  <tr key={file.source} className="hover:bg-white/5">
+                {files.map((file, index) => (
+                  <tr key={file.source} className="hover:bg-white/[0.035]">
                     <td className="px-5 py-4">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <FileImage className="w-4 h-4 text-cyan-400 shrink-0" />
-                        <span className="font-mono text-xs truncate max-w-[420px]" title={file.source}>{file.source}</span>
+                      <div className="flex min-w-0 items-center gap-2">
+                        <FileImage className="h-4 w-4 shrink-0 text-cyan-400" />
+                        <div className="min-w-0">
+                          <div className="max-w-[330px] truncate font-mono text-xs text-gray-200" title={file.source}>
+                            {file.source}
+                          </div>
+                          {file.error && (
+                            <div className="mt-1 flex max-w-[330px] items-center gap-1 text-[11px] text-red-400">
+                              <CircleAlert className="h-3 w-3 shrink-0" />
+                              <span className="truncate" title={file.error}>{file.error}</span>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </td>
+
                     <td className="px-5 py-4 text-xs text-gray-400">{formatBytes(file.size)}</td>
+
                     <td className="px-5 py-4 font-mono text-xs text-emerald-400">{file.output_filename}</td>
+
+                    <td className="px-5 py-4">
+                      <div className="flex items-center gap-3">
+                        <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/[0.07]">
+                          <div
+                            className={
+                              "h-full rounded-full transition-[width] duration-300 " +
+                              (file.status === "error"
+                                ? "bg-red-500"
+                                : file.status === "skipped"
+                                  ? "bg-amber-500"
+                                  : "bg-blue-500")
+                            }
+                            style={{ width: `${file.progress}%` }}
+                          />
+                        </div>
+                        <span className="w-9 text-right font-mono text-[11px] text-gray-500">{file.progress}%</span>
+                      </div>
+                    </td>
+
+                    <td className="px-5 py-4">
+                      <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium ${statusClass(file.status)}`}>
+                        {file.status === "processing" && <LoaderCircle className="h-3 w-3 animate-spin" />}
+                        {file.status === "success" && <Check className="h-3 w-3" />}
+                        {file.status === "error" && <CircleAlert className="h-3 w-3" />}
+                        {statusLabel(file.status)}
+                      </span>
+                    </td>
                   </tr>
                 ))}
               </tbody>
