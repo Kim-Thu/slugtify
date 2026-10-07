@@ -5,29 +5,28 @@ import { PageWrapper } from "@/components/PageWrapper";
 import { SectionHeader } from "@/components/SectionHeader";
 import { useLanguage } from "@/hooks/useLanguage";
 import { apiClient } from "@/utils/api";
-import { FileImage, FolderOpen, Images, RefreshCw } from "lucide-react";
+import { downloadBlob, pickFiles } from "@/utils/filePicker";
+import { FileImage, FolderOpen, Images } from "lucide-react";
 import { useMemo, useState } from "react";
 
 type PreviewFile = {
   source: string;
   filename: string;
-  output: string;
   output_filename: string;
   size: number;
-  exists: boolean;
 };
+
+const IMAGE_PATTERN = /\.(png|jpe?g|webp|bmp|tiff?)$/i;
 
 export default function ImageConverterPage() {
   const { language } = useLanguage();
   const vi = language === "vi";
 
-  const [paths, setPaths] = useState<string[]>([]);
-  const [outputDir, setOutputDir] = useState("");
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [relativePaths, setRelativePaths] = useState<string[]>([]);
   const [format, setFormat] = useState("webp");
   const [quality, setQuality] = useState(85);
   const [recursive, setRecursive] = useState(true);
-  const [overwrite, setOverwrite] = useState(false);
-  const [deleteSource, setDeleteSource] = useState(false);
   const [files, setFiles] = useState<PreviewFile[]>([]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
@@ -44,69 +43,79 @@ export default function ImageConverterPage() {
     return `${(bytes / Math.pow(1024, index)).toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
   };
 
+  const makePreview = (sourceFiles: File[], paths: string[], nextFormat = format, includeSubfolders = recursive) => {
+    const ext = nextFormat === "jpg" ? ".jpg" : `.${nextFormat}`;
+    const preview: PreviewFile[] = [];
+
+    sourceFiles.forEach((file, index) => {
+      const relative = paths[index] || file.name;
+      const parts = relative.split("/").filter(Boolean);
+
+      // webkitdirectory returns root/file for top-level files.
+      if (!includeSubfolders && parts.length > 2) return;
+
+      const outputName = file.name.replace(/\.[^.]+$/, "") + ext;
+      preview.push({
+        source: relative,
+        filename: file.name,
+        output_filename: outputName,
+        size: file.size,
+      });
+    });
+
+    setFiles(preview);
+  };
+
   const chooseSource = async (mode: "folder" | "files") => {
     setMessage("");
-    const result = await apiClient.browse(mode);
-    if (result.paths?.length) {
-      setPaths(result.paths);
-      setFiles([]);
-    }
-  };
+    const picked = await pickFiles({
+      directory: mode === "folder",
+      multiple: true,
+      accept: mode === "files" ? "image/png,image/jpeg,image/webp,image/bmp,image/tiff,.tif,.tiff" : undefined,
+    });
 
-  const chooseOutput = async () => {
-    const result = await apiClient.browse("folder");
-    if (result.paths?.[0]) {
-      setOutputDir(result.paths[0]);
-      setFiles([]);
-    }
-  };
+    const accepted = picked.files
+      .map((file, index) => ({ file, path: picked.relativePaths[index] }))
+      .filter(({ file }) => IMAGE_PATTERN.test(file.name));
 
-  const analyze = async () => {
-    if (!paths.length) {
-      setMessage(vi ? "Vui lòng chọn thư mục hoặc ảnh trước." : "Select a folder or images first.");
+    if (!accepted.length) {
+      if (picked.files.length) {
+        setMessage(vi ? "Không tìm thấy ảnh được hỗ trợ." : "No supported images found.");
+      }
       return;
     }
 
-    setLoading(true);
-    setMessage("");
-    try {
-      const result = await apiClient.imageAnalyze(paths, format, outputDir || undefined, recursive);
-      setFiles(result.files || []);
-      if (!result.files?.length) {
-        setMessage(vi ? "Không tìm thấy ảnh được hỗ trợ." : "No supported images found.");
-      }
-    } catch (error: any) {
-      setMessage(error?.message || (vi ? "Không thể phân tích ảnh." : "Unable to analyze images."));
-    } finally {
-      setLoading(false);
-    }
+    const nextFiles = accepted.map(({ file }) => file);
+    const nextPaths = accepted.map(({ path }) => path);
+    setSelectedFiles(nextFiles);
+    setRelativePaths(nextPaths);
+    makePreview(nextFiles, nextPaths);
   };
 
   const convert = async () => {
-    if (!paths.length) return;
+    if (!selectedFiles.length) return;
+
+    const active = selectedFiles
+      .map((file, index) => ({ file, path: relativePaths[index] || file.name }))
+      .filter(({ path }) => recursive || path.split("/").filter(Boolean).length <= 2);
+
+    if (!active.length) return;
 
     setLoading(true);
     setMessage("");
     try {
-      const result = await apiClient.imageConvert(
-        paths,
+      const blob = await apiClient.webImageConvert(
+        active.map(({ file }) => file),
+        active.map(({ path }) => path),
         format,
-        outputDir || undefined,
-        quality,
-        recursive,
-        overwrite,
-        deleteSource
+        quality
       );
+      downloadBlob(blob, `converted-${format}.zip`);
       setMessage(
         vi
-          ? `Đã chuyển ${result.success} ảnh. Đã xóa ảnh gốc: ${result.deleted || 0}. Bỏ qua ${result.skipped || 0}. Lỗi ${(result.errors?.length || 0) + (result.delete_errors?.length || 0)}.`
-          : `Converted ${result.success} images. Deleted originals: ${result.deleted || 0}. Skipped ${result.skipped || 0}. Errors ${(result.errors?.length || 0) + (result.delete_errors?.length || 0)}.`
+          ? `Đã xử lý ${active.length} ảnh. Kết quả được tải về dưới dạng converted-${format}.zip.`
+          : `Processed ${active.length} images. The result was downloaded as converted-${format}.zip.`
       );
-      if (deleteSource) {
-        setFiles([]);
-      } else {
-        await analyze();
-      }
     } catch (error: any) {
       setMessage(error?.message || (vi ? "Chuyển đổi thất bại." : "Conversion failed."));
     } finally {
@@ -117,12 +126,12 @@ export default function ImageConverterPage() {
   return (
     <PageWrapper maxWidth="max-w-6xl">
       <SectionHeader
-        title={vi ? "Image" : "Image"}
-        highlight={vi ? "Converter" : "Converter"}
+        title="Image"
+        highlight="Converter"
         subtitle={
           vi
-            ? "Chọn nhiều ảnh hoặc cả thư mục, xem trước rồi đổi định dạng hàng loạt."
-            : "Select multiple images or a folder, preview, then convert them in bulk."
+            ? "Chọn nhiều ảnh hoặc cả thư mục ngay trong trình duyệt, xem trước rồi đổi định dạng hàng loạt."
+            : "Select multiple images or a folder in the browser, preview, then convert them in bulk."
         }
         className="mb-8"
       />
@@ -140,7 +149,7 @@ export default function ImageConverterPage() {
             {vi ? "Chọn thư mục ảnh" : "Select image folder"}
           </h3>
           <p className="text-gray-500 text-sm text-center">
-            {vi ? "Có thể quét cả thư mục con" : "Can include subfolders"}
+            {vi ? "Mở bằng file picker của trình duyệt, không phụ thuộc hệ điều hành server" : "Uses the browser picker, independent of the server OS"}
           </p>
         </GlassCard>
 
@@ -162,24 +171,15 @@ export default function ImageConverterPage() {
       </div>
 
       <GlassCard className="space-y-6">
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
-          <div className="lg:col-span-2 space-y-2">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div className="space-y-2">
             <label className="text-xs font-bold uppercase text-gray-500">
-              {vi ? "Nguồn" : "Source"}
+              {vi ? "Ảnh đã chọn" : "Selected images"}
             </label>
-            <div className="glass p-2 rounded-xl flex gap-2 bg-white/5">
-              <input
-                readOnly
-                value={paths.join("; ")}
-                placeholder={vi ? "Chưa chọn ảnh" : "No images selected"}
-                className="flex-1 bg-transparent px-3 py-2 outline-none text-xs font-mono truncate"
-              />
-              <button
-                onClick={() => chooseSource("folder")}
-                className="px-4 rounded-lg bg-white/10 hover:bg-white/20 text-xs font-bold"
-              >
-                {vi ? "Chọn" : "Browse"}
-              </button>
+            <div className="glass px-4 py-3 rounded-xl bg-white/5 text-sm">
+              {selectedFiles.length
+                ? (vi ? `${selectedFiles.length} ảnh` : `${selectedFiles.length} images`)
+                : (vi ? "Chưa chọn ảnh" : "No images selected")}
             </div>
           </div>
 
@@ -190,8 +190,9 @@ export default function ImageConverterPage() {
             <select
               value={format}
               onChange={(e) => {
-                setFormat(e.target.value);
-                setFiles([]);
+                const next = e.target.value;
+                setFormat(next);
+                makePreview(selectedFiles, relativePaths, next, recursive);
               }}
               className="w-full glass bg-black/30 rounded-xl px-4 py-3 outline-none"
             >
@@ -219,80 +220,41 @@ export default function ImageConverterPage() {
           </div>
         </div>
 
-        <div className="space-y-2">
-          <label className="text-xs font-bold uppercase text-gray-500">
-            {vi ? "Thư mục đích" : "Output folder"}
-          </label>
-          <div className="glass p-2 rounded-xl flex gap-2 bg-white/5">
-            <input
-              readOnly
-              value={outputDir}
-              placeholder={
-                vi
-                  ? "Để trống: tự tạo thư mục converted-{format}"
-                  : "Empty: auto-create converted-{format}"
-              }
-              className="flex-1 bg-transparent px-3 py-2 outline-none text-xs font-mono truncate"
-            />
-            <button
-              onClick={chooseOutput}
-              className="px-4 rounded-lg bg-blue-600 hover:bg-blue-500 text-xs font-bold"
-            >
-              {vi ? "Chọn đích" : "Browse"}
-            </button>
-          </div>
-        </div>
-
         <div className="flex flex-wrap gap-6 text-sm text-gray-300">
           <label className="flex items-center gap-2">
             <input
               type="checkbox"
               checked={recursive}
               onChange={(e) => {
-                setRecursive(e.target.checked);
-                setFiles([]);
+                const next = e.target.checked;
+                setRecursive(next);
+                makePreview(selectedFiles, relativePaths, format, next);
               }}
             />
-            {vi ? "Quét thư mục con" : "Include subfolders"}
+            {vi ? "Bao gồm thư mục con" : "Include subfolders"}
           </label>
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={overwrite}
-              onChange={(e) => setOverwrite(e.target.checked)}
-            />
-            {vi ? "Ghi đè nếu file đích đã tồn tại" : "Overwrite existing output"}
-          </label>
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={deleteSource}
-              onChange={(e) => setDeleteSource(e.target.checked)}
-            />
-            <span>
-              {vi ? "Xóa ảnh gốc sau khi chuyển đổi thành công" : "Delete source images after successful conversion"}
-              <span className="block text-[11px] text-amber-400/80">
-                {vi ? "Chỉ xóa file đã chuyển đổi thành công." : "Only successfully converted source files are deleted."}
-              </span>
-            </span>
-          </label>
+        </div>
+
+        <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-xs text-amber-300/90">
+          {vi
+            ? "Chế độ web không được phép xóa ảnh gốc trên máy của bạn. Ảnh gốc được giữ nguyên và kết quả được tải về dưới dạng ZIP."
+            : "Web mode cannot delete source files on your computer. Originals stay untouched and converted files are downloaded as a ZIP."}
         </div>
 
         <div className="flex flex-wrap gap-3">
           <button
-            onClick={analyze}
-            disabled={loading || !paths.length}
-            className="px-6 py-3 rounded-xl bg-white/10 hover:bg-white/20 disabled:opacity-50 font-bold flex items-center gap-2"
+            onClick={() => chooseSource("folder")}
+            disabled={loading}
+            className="px-6 py-3 rounded-xl bg-white/10 hover:bg-white/20 disabled:opacity-50 font-bold"
           >
-            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-            {vi ? "Xem trước" : "Preview"}
+            {vi ? "Chọn lại" : "Choose again"}
           </button>
           <button
             onClick={convert}
             disabled={loading || !files.length}
             className="px-6 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 font-bold"
           >
-            {loading ? (vi ? "Đang xử lý..." : "Processing...") : (vi ? "Chuyển đổi tất cả" : "Convert all")}
+            {loading ? (vi ? "Đang xử lý..." : "Processing...") : (vi ? "Chuyển đổi & tải ZIP" : "Convert & download ZIP")}
           </button>
         </div>
 
@@ -307,15 +269,12 @@ export default function ImageConverterPage() {
         <GlassCard className="p-0 overflow-hidden">
           <div className="p-4 border-b border-white/10 bg-white/5 flex flex-wrap justify-between gap-3">
             <span className="text-sm text-gray-400">
-              {vi ? "Ảnh tìm thấy" : "Images found"}: <strong className="text-white">{files.length}</strong>
+              {vi ? "Ảnh sẽ xử lý" : "Images to process"}: <strong className="text-white">{files.length}</strong>
               {" · "}
               {formatBytes(totalSize)}
             </span>
-            <span className="text-sm text-gray-400">
-              {vi ? "Trùng file đích" : "Existing outputs"}:{" "}
-              <strong className={files.some((file) => file.exists) ? "text-amber-400" : "text-emerald-400"}>
-                {files.filter((file) => file.exists).length}
-              </strong>
+            <span className="text-sm text-gray-500">
+              {vi ? "Đầu ra" : "Output"}: converted-{format}.zip
             </span>
           </div>
 
@@ -326,7 +285,6 @@ export default function ImageConverterPage() {
                   <th className="px-5 py-4">{vi ? "Ảnh gốc" : "Source"}</th>
                   <th className="px-5 py-4">{vi ? "Kích thước" : "Size"}</th>
                   <th className="px-5 py-4">{vi ? "File mới" : "Output"}</th>
-                  <th className="px-5 py-4">{vi ? "Trạng thái" : "Status"}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5">
@@ -335,21 +293,14 @@ export default function ImageConverterPage() {
                     <td className="px-5 py-4">
                       <div className="flex items-center gap-2 min-w-0">
                         <FileImage className="w-4 h-4 text-cyan-400 shrink-0" />
-                        <span className="font-mono text-xs truncate max-w-[360px]" title={file.source}>
-                          {file.filename}
+                        <span className="font-mono text-xs truncate max-w-[420px]" title={file.source}>
+                          {file.source}
                         </span>
                       </div>
                     </td>
                     <td className="px-5 py-4 text-xs text-gray-400">{formatBytes(file.size)}</td>
                     <td className="px-5 py-4 font-mono text-xs text-emerald-400">
                       {file.output_filename}
-                    </td>
-                    <td className="px-5 py-4 text-xs">
-                      {file.exists ? (
-                        <span className="text-amber-400">{vi ? "Đã tồn tại" : "Exists"}</span>
-                      ) : (
-                        <span className="text-gray-500">{vi ? "Sẵn sàng" : "Ready"}</span>
-                      )}
                     </td>
                   </tr>
                 ))}
