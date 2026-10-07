@@ -7,6 +7,7 @@ import { useLanguage } from "@/hooks/useLanguage";
 import { apiClient } from "@/utils/api";
 import { cn } from "@/utils/cn";
 import { formatSize } from "@/utils/format";
+import { downloadBlob, pickFiles } from "@/utils/filePicker";
 import { html } from "@codemirror/lang-html";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { Check, Copy, FileCode, Folder, Link, Settings, Zap } from "lucide-react";
@@ -32,6 +33,8 @@ export default function HtmlCleanerPage() {
     const [mounted, setMounted] = useState(false);
     const [activeMode, setActiveMode] = useState<"file" | "paste">("file");
     const [paths, setPaths] = useState<string[]>([]);
+    const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+    const [relativePaths, setRelativePaths] = useState<string[]>([]);
     const [outputDir, setOutputDir] = useState("");
     const [files, setFiles] = useState<HtmlFilePreview[]>([]);
     const [pastedText, setPastedText] = useState("");
@@ -115,36 +118,47 @@ export default function HtmlCleanerPage() {
     };
 
     const browse = async (target: "input" | "output") => {
-        const mode = target === "output" ? "folder" : "files";
-        const data = await apiClient.browse(mode);
-        if (data.paths && data.paths.length > 0) {
-            if (target === "output") {
-                setOutputDir(data.paths[0]);
-                toast.success(t.common.success);
-            } else {
-                const htmFiles = data.paths.filter((p: string) => p.endsWith(".html") || p.endsWith(".htm"));
-                if (htmFiles.length === 0) {
-                    toast.error(t.html_cleaner.step_1_subtitle);
-                    return;
-                }
-                setPaths(htmFiles);
-                analyze(htmFiles);
-            }
+        if (target === "output") {
+            setOutputDir("cleaned-html.zip");
+            toast.success(t.common.success);
+            return;
         }
+
+        const picked = await pickFiles({
+            multiple: true,
+            accept: ".html,.htm,text/html",
+        });
+        const htmlFiles = picked.files
+            .map((file, index) => ({ file, path: picked.relativePaths[index] }))
+            .filter(({ file }) => /\.html?$/i.test(file.name));
+
+        if (htmlFiles.length === 0) {
+            toast.error(t.html_cleaner.step_1_subtitle);
+            return;
+        }
+
+        const nextFiles = htmlFiles.map(({ file }) => file);
+        const nextPaths = htmlFiles.map(({ path }) => path);
+        setSelectedFiles(nextFiles);
+        setRelativePaths(nextPaths);
+        setPaths(nextPaths);
+        await analyze(nextFiles, nextPaths);
     };
 
-    const analyze = async (targetPaths?: string[]) => {
+    const analyze = async (sourceFiles?: File[], sourcePaths?: string[]) => {
         if (activeMode === "paste") {
             await handlePasteClean();
             return;
         }
-        const ps = targetPaths || paths;
-        if (ps.length === 0) return;
+
+        const fs = sourceFiles || selectedFiles;
+        const rels = sourcePaths || relativePaths;
+        if (fs.length === 0) return;
 
         const tId = toast.loading(t.common.loading);
         setLoading(true);
         try {
-            const data = await apiClient.htmlAnalyze(ps, options as any);
+            const data = await apiClient.webHtmlAnalyze(fs, rels, options as any);
             setFiles(data.files);
             toast.success(t.common.success, { id: tId });
         } catch (err: any) {
@@ -155,13 +169,16 @@ export default function HtmlCleanerPage() {
     };
 
     const executeClean = async () => {
-        if (files.length === 0) return;
+        if (files.length === 0 || selectedFiles.length === 0) return;
         const tId = toast.loading(t.common.loading);
         setLoading(true);
         try {
-            const result = await apiClient.htmlExecute(paths, options as any, outputDir);
+            const blob = await apiClient.webHtmlExecute(selectedFiles, relativePaths, options as any);
+            downloadBlob(blob, "cleaned-html.zip");
             toast.success(t.common.success, { id: tId });
             setPaths([]);
+            setSelectedFiles([]);
+            setRelativePaths([]);
             setFiles([]);
         } catch (err: any) {
             toast.error(err.message, { id: tId });
@@ -233,7 +250,7 @@ export default function HtmlCleanerPage() {
                                     <div>
                                         <h3 className="font-bold text-white uppercase tracking-tight">{t.html_cleaner.step_2_dest}</h3>
                                         <p className="text-xs text-gray-500 uppercase tracking-wider text-nowrap truncate max-w-[200px]">
-                                            {outputDir || t.html_cleaner.step_2_overwrite}
+                                            {outputDir || "ZIP download"}
                                         </p>
                                     </div>
                                 </div>
