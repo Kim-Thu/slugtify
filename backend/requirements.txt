@@ -4,3 +4,4 @@ python-slugify
 pydantic
 beautifulsoup4
 lxml
+Pillow

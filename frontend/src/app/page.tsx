@@ -7,6 +7,7 @@ import { useFileRename } from "@/hooks/useFileRename";
 import { useLanguage } from "@/hooks/useLanguage";
 import { cn } from "@/utils/cn";
 import { AlertCircle, ChevronRight, File, Folder, Hash } from "lucide-react";
+import toast from "react-hot-toast";
 
 export default function Home() {
     const { t } = useLanguage();
@@ -18,7 +19,7 @@ export default function Home() {
             const msg = t.rename.status_success
                 .replace("{success}", result.success.toString())
                 .replace("{error}", (result.errors?.length || 0).toString());
-            alert(msg);
+            toast.success(msg);
         }
     };
 
