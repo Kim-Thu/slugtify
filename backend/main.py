@@ -1,16 +1,9 @@
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Dict, Any
-from fastapi.responses import StreamingResponse
 
-import io
-import json
 import os
-import zipfile
-from pathlib import PurePosixPath
-
-from PIL import Image, ImageOps
 from services.file_service import FileSystemService
 from services.naming_strategy import SlugNamingStrategy
 from services.html_service import HtmlCleaner
@@ -41,10 +34,29 @@ class BulkRenameRequest(BaseModel):
 
 @app.get("/browse")
 async def browse_directory(mode: str = "folder"):
-    raise HTTPException(
-        status_code=410,
-        detail="Desktop file picker was removed. Use the browser file/folder picker and upload endpoints."
-    )
+    import tkinter as tk
+    from tkinter import filedialog
+    
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes('-topmost', True)
+    
+    paths = []
+    if mode == "folder":
+        path = filedialog.askdirectory(title="Chọn thư mục chứa tệp")
+        if path:
+            paths = [path]
+    else:
+        # mode == "files"
+        selected = filedialog.askopenfilenames(
+            title="Chọn một hoặc nhiều tệp",
+            filetypes=[("All Files", "*.*")]
+        )
+        if selected:
+            paths = list(selected)
+            
+    root.destroy()
+    return {"paths": paths}
 
 @app.post("/analyze")
 async def analyze_items(request: Dict[str, Any], service: FileSystemService = Depends(get_file_service)):
@@ -206,196 +218,6 @@ async def clean_html_text(request: HtmlTextCleanRequest):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
-# Browser-native upload APIs.
-# These endpoints make the app work the same way locally, in Docker, and on a remote server.
-
-def _safe_relative_path(raw: str, fallback: str) -> PurePosixPath:
-    candidate = PurePosixPath((raw or fallback).replace("\\", "/"))
-    clean_parts = [part for part in candidate.parts if part not in ("", ".", "..", "/")]
-    return PurePosixPath(*clean_parts) if clean_parts else PurePosixPath(fallback)
-
-
-def _zip_response(buffer: io.BytesIO, filename: str) -> StreamingResponse:
-    buffer.seek(0)
-    return StreamingResponse(
-        buffer,
-        media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
-
-
-@app.post("/web/rename/analyze")
-async def web_rename_analyze(
-    files: List[UploadFile] = File(...),
-    relative_paths: List[str] = Form([]),
-    pattern: str = Form("{slug}"),
-):
-    strategy = SlugNamingStrategy()
-    results = []
-    for index, upload in enumerate(files):
-        rel = _safe_relative_path(
-            relative_paths[index] if index < len(relative_paths) else upload.filename or f"file-{index}",
-            upload.filename or f"file-{index}",
-        )
-        original = rel.name
-        results.append({
-            "original": original,
-            "slugified": strategy.transform(original, False, index, pattern),
-            "is_directory": False,
-            "base_dir": str(rel.parent) if str(rel.parent) != "." else "",
-            "relative_path": str(rel),
-        })
-    return {"files": results}
-
-
-@app.post("/web/rename/execute")
-async def web_rename_execute(
-    files: List[UploadFile] = File(...),
-    relative_paths: List[str] = Form([]),
-    renames: str = Form("[]"),
-):
-    rename_items = json.loads(renames)
-    rename_map = {
-        (item.get("base_dir", ""), item.get("original", "")): item.get("slugified", item.get("original", ""))
-        for item in rename_items
-    }
-    output = io.BytesIO()
-    with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
-        for index, upload in enumerate(files):
-            rel = _safe_relative_path(
-                relative_paths[index] if index < len(relative_paths) else upload.filename or f"file-{index}",
-                upload.filename or f"file-{index}",
-            )
-            parent = "" if str(rel.parent) == "." else str(rel.parent)
-            new_name = rename_map.get((parent, rel.name), rel.name)
-            target = PurePosixPath(parent) / new_name if parent else PurePosixPath(new_name)
-            archive.writestr(str(target), await upload.read())
-    return _zip_response(output, "renamed-files.zip")
-
-
-@app.post("/web/html/analyze")
-async def web_html_analyze(
-    files: List[UploadFile] = File(...),
-    relative_paths: List[str] = Form([]),
-    options: str = Form("{}"),
-):
-    clean_options = json.loads(options)
-    results = []
-    for index, upload in enumerate(files):
-        rel = _safe_relative_path(
-            relative_paths[index] if index < len(relative_paths) else upload.filename or f"file-{index}.html",
-            upload.filename or f"file-{index}.html",
-        )
-        if rel.suffix.lower() not in {".html", ".htm"}:
-            continue
-        try:
-            content = (await upload.read()).decode("utf-8")
-            cleaned = HtmlCleaner.clean(content, clean_options)
-            results.append({
-                "path": str(rel),
-                "filename": rel.name,
-                "original_size": len(content.encode("utf-8")),
-                "cleaned_size": len(cleaned.encode("utf-8")),
-                "preview": cleaned[:500] + "..." if len(cleaned) > 500 else cleaned,
-            })
-        except Exception as exc:
-            results.append({"path": str(rel), "filename": rel.name, "error": str(exc)})
-    return {"files": results}
-
-
-@app.post("/web/html/execute")
-async def web_html_execute(
-    files: List[UploadFile] = File(...),
-    relative_paths: List[str] = Form([]),
-    options: str = Form("{}"),
-):
-    clean_options = json.loads(options)
-    output = io.BytesIO()
-    with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
-        for index, upload in enumerate(files):
-            rel = _safe_relative_path(
-                relative_paths[index] if index < len(relative_paths) else upload.filename or f"file-{index}.html",
-                upload.filename or f"file-{index}.html",
-            )
-            if rel.suffix.lower() not in {".html", ".htm"}:
-                continue
-            content = (await upload.read()).decode("utf-8")
-            cleaned = HtmlCleaner.clean(content, clean_options)
-            archive.writestr(str(rel), cleaned.encode("utf-8"))
-    return _zip_response(output, "cleaned-html.zip")
-
-
-@app.post("/web/image/convert")
-async def web_image_convert(
-    files: List[UploadFile] = File(...),
-    relative_paths: List[str] = Form([]),
-    target_format: str = Form("webp"),
-    quality: int = Form(85),
-):
-    fmt = target_format.lower()
-    if fmt not in {"png", "jpg", "webp", "bmp", "tiff"}:
-        raise HTTPException(status_code=400, detail=f"Unsupported target format: {target_format}")
-
-    quality = max(1, min(100, int(quality)))
-    output = io.BytesIO()
-    errors = []
-
-    with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
-        for index, upload in enumerate(files):
-            rel = _safe_relative_path(
-                relative_paths[index] if index < len(relative_paths) else upload.filename or f"image-{index}",
-                upload.filename or f"image-{index}",
-            )
-            if rel.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}:
-                continue
-
-            try:
-                raw = await upload.read()
-                with Image.open(io.BytesIO(raw)) as image:
-                    image = ImageOps.exif_transpose(image)
-                    save_kwargs: Dict[str, Any] = {}
-                    pil_format = fmt.upper()
-
-                    if fmt == "jpg":
-                        pil_format = "JPEG"
-                        if image.mode in ("RGBA", "LA") or (image.mode == "P" and "transparency" in image.info):
-                            rgba = image.convert("RGBA")
-                            background = Image.new("RGB", rgba.size, "white")
-                            background.paste(rgba, mask=rgba.getchannel("A"))
-                            image = background
-                        elif image.mode != "RGB":
-                            image = image.convert("RGB")
-                        save_kwargs = {"quality": quality, "optimize": True}
-                    elif fmt == "webp":
-                        if image.mode not in ("RGB", "RGBA"):
-                            image = image.convert("RGBA" if "transparency" in image.info else "RGB")
-                        save_kwargs = {"quality": quality, "method": 6}
-                    elif fmt == "png":
-                        if image.mode == "CMYK":
-                            image = image.convert("RGB")
-                        save_kwargs = {"optimize": True}
-                    elif fmt == "bmp":
-                        if image.mode not in ("RGB", "RGBA"):
-                            image = image.convert("RGB")
-                    elif fmt == "tiff":
-                        save_kwargs = {"compression": "tiff_deflate"}
-
-                    converted = io.BytesIO()
-                    image.save(converted, format=pil_format, **save_kwargs)
-                    converted.seek(0)
-
-                    ext = ".jpg" if fmt == "jpg" else f".{fmt}"
-                    target = rel.with_suffix(ext)
-                    archive.writestr(str(target), converted.read())
-            except Exception as exc:
-                errors.append({"path": str(rel), "error": str(exc)})
-
-        if errors:
-            archive.writestr("_conversion-errors.json", json.dumps(errors, ensure_ascii=False, indent=2))
-
-    return _zip_response(output, f"converted-{fmt}.zip")
 
 if __name__ == "__main__":
     import uvicorn
