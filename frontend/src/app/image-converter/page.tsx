@@ -14,7 +14,7 @@ import {
   LoaderCircle,
   RefreshCw,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type AnyFileHandle = any;
 type AnyDirectoryHandle = any;
@@ -80,6 +80,7 @@ export default function ImageConverterPage() {
   const [outputDir, setOutputDir] = useState<AnyDirectoryHandle | null>(null);
   const [format, setFormat] = useState("webp");
   const [formatOpen, setFormatOpen] = useState(false);
+  const formatDropdownRef = useRef<HTMLDivElement | null>(null);
   const [quality, setQuality] = useState(85);
   const [recursive, setRecursive] = useState(true);
   const [overwrite, setOverwrite] = useState(false);
@@ -87,6 +88,28 @@ export default function ImageConverterPage() {
   const [files, setFiles] = useState<PreviewFile[]>([]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    if (!formatOpen) return;
+
+    const handlePointerDown = (event: MouseEvent | PointerEvent) => {
+      if (!formatDropdownRef.current?.contains(event.target as Node)) {
+        setFormatOpen(false);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setFormatOpen(false);
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [formatOpen]);
 
   const totalSize = useMemo(() => files.reduce((sum, file) => sum + file.size, 0), [files]);
   const completedCount = useMemo(
@@ -458,7 +481,7 @@ export default function ImageConverterPage() {
             </div>
           </div>
 
-          <div className="relative space-y-2">
+          <div ref={formatDropdownRef} className="relative space-y-2">
             <label className="text-xs font-bold uppercase text-gray-500">{vi ? "Định dạng đích" : "Target format"}</label>
             <button
               type="button"
@@ -502,15 +525,54 @@ export default function ImageConverterPage() {
           <div className="space-y-2">
             <label className="text-xs font-bold uppercase text-gray-500">{vi ? "Chất lượng" : "Quality"}: {quality}</label>
             <div className="flex h-[50px] items-center">
-              <input
-                type="range"
-                min="1"
-                max="100"
-                value={quality}
-                onChange={(e) => setQuality(Number(e.target.value))}
-                className="w-full accent-blue-500"
-                disabled={!["jpg", "webp"].includes(format)}
-              />
+              <div className="relative w-full">
+                <input
+                  type="range"
+                  min="1"
+                  max="100"
+                  value={quality}
+                  onChange={(e) => setQuality(Number(e.target.value))}
+                  disabled={!["jpg", "webp"].includes(format)}
+                  aria-label={vi ? "Chất lượng ảnh" : "Image quality"}
+                  style={{
+                    background: `linear-gradient(to right, rgb(59 130 246) 0%, rgb(96 165 250) ${quality}%, rgba(255,255,255,0.10) ${quality}%, rgba(255,255,255,0.10) 100%)`,
+                  }}
+                  className="h-2 w-full appearance-none rounded-full outline-none transition-opacity
+                    disabled:cursor-not-allowed disabled:opacity-35
+                    [&::-webkit-slider-runnable-track]:h-2
+                    [&::-webkit-slider-runnable-track]:rounded-full
+                    [&::-webkit-slider-runnable-track]:bg-transparent
+                    [&::-webkit-slider-thumb]:-mt-[5px]
+                    [&::-webkit-slider-thumb]:h-[18px]
+                    [&::-webkit-slider-thumb]:w-[18px]
+                    [&::-webkit-slider-thumb]:appearance-none
+                    [&::-webkit-slider-thumb]:rounded-full
+                    [&::-webkit-slider-thumb]:border-[3px]
+                    [&::-webkit-slider-thumb]:border-[#11131b]
+                    [&::-webkit-slider-thumb]:bg-blue-400
+                    [&::-webkit-slider-thumb]:shadow-[0_0_0_3px_rgba(59,130,246,0.18),0_2px_8px_rgba(0,0,0,0.45)]
+                    [&::-webkit-slider-thumb]:transition-transform
+                    [&::-webkit-slider-thumb]:hover:scale-110
+                    [&::-moz-range-track]:h-2
+                    [&::-moz-range-track]:rounded-full
+                    [&::-moz-range-track]:bg-white/10
+                    [&::-moz-range-progress]:h-2
+                    [&::-moz-range-progress]:rounded-full
+                    [&::-moz-range-progress]:bg-blue-500
+                    [&::-moz-range-thumb]:h-[14px]
+                    [&::-moz-range-thumb]:w-[14px]
+                    [&::-moz-range-thumb]:rounded-full
+                    [&::-moz-range-thumb]:border-[3px]
+                    [&::-moz-range-thumb]:border-[#11131b]
+                    [&::-moz-range-thumb]:bg-blue-400"
+                />
+                <div
+                  className="pointer-events-none absolute -top-7 -translate-x-1/2 rounded-md border border-blue-400/20 bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-blue-300 opacity-0 transition-opacity"
+                  style={{ left: `${quality}%` }}
+                >
+                  {quality}
+                </div>
+              </div>
             </div>
           </div>
         </div>
