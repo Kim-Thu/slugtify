@@ -104,6 +104,7 @@ class ImageConverter:
         quality: int = 85,
         recursive: bool = True,
         overwrite: bool = False,
+        delete_source: bool = False,
     ) -> Dict[str, Any]:
         fmt = target_format.lower()
         if fmt not in SUPPORTED_FORMATS:
@@ -117,7 +118,9 @@ class ImageConverter:
         converted = 0
         skipped = 0
         errors: List[Dict[str, str]] = []
+        delete_errors: List[Dict[str, str]] = []
         outputs: List[str] = []
+        deleted = 0
 
         for source in files:
             dest = ImageConverter.output_path(source, paths, target, fmt, recursive)
@@ -163,13 +166,22 @@ class ImageConverter:
 
                 converted += 1
                 outputs.append(str(dest))
+
+                if delete_source and source.resolve() != dest.resolve():
+                    try:
+                        source.unlink()
+                        deleted += 1
+                    except Exception as delete_exc:
+                        delete_errors.append({"path": str(source), "error": str(delete_exc)})
             except Exception as exc:
                 errors.append({"path": str(source), "error": str(exc)})
 
         return {
             "success": converted,
             "skipped": skipped,
+            "deleted": deleted,
             "errors": errors,
+            "delete_errors": delete_errors,
             "output_dir": str(target),
             "outputs": outputs,
         }
