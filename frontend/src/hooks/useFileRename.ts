@@ -1,4 +1,5 @@
 import { apiClient } from "@/utils/api";
+import { downloadBlob, pickFiles } from "@/utils/filePicker";
 import { useState } from "react";
 
 export interface FileEntry {
@@ -6,10 +7,13 @@ export interface FileEntry {
   slugified: string;
   is_directory: boolean;
   base_dir?: string;
+  relative_path?: string;
 }
 
 export const useFileRename = () => {
   const [paths, setPaths] = useState<string[]>([]);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [relativePaths, setRelativePaths] = useState<string[]>([]);
   const [outputPath, setOutputPath] = useState("");
   const [pattern, setPattern] = useState("{slug}");
   const [files, setFiles] = useState<FileEntry[]>([]);
@@ -17,26 +21,46 @@ export const useFileRename = () => {
   const [error, setError] = useState<string | null>(null);
 
   const browse = async (target: "input_folder" | "input_files" | "output" = "input_folder") => {
-    const mode = target === "input_files" ? "files" : "folder";
-    const data = await apiClient.browse(mode);
-    if (data.paths && data.paths.length > 0) {
-      if (target === "output") {
-        setOutputPath(data.paths[0]);
-      } else {
-        setPaths(data.paths);
-        await analyze(data.paths, pattern);
-      }
+    if (target === "output") {
+      setOutputPath("renamed-files.zip");
+      return;
     }
+
+    const picked = await pickFiles({
+      directory: target === "input_folder",
+      multiple: true,
+    });
+
+    if (!picked.files.length) return;
+
+    setSelectedFiles(picked.files);
+    setRelativePaths(picked.relativePaths);
+    setPaths(picked.relativePaths);
+    await analyze(picked.files, picked.relativePaths, pattern);
   };
 
-  const analyze = async (targetPaths?: string[], targetPattern?: string) => {
-    const ps = targetPaths || paths;
-    const pat = targetPattern || pattern;
-    if (ps.length === 0) return;
+  const analyze = async (
+    sourceFiles?: File[] | string[],
+    sourceRelativePaths?: string[] | string,
+    targetPattern?: string
+  ) => {
+    const actualFiles = Array.isArray(sourceFiles) && sourceFiles.length > 0 && sourceFiles[0] instanceof File
+      ? sourceFiles as File[]
+      : selectedFiles;
+
+    let rels = relativePaths;
+    let pat = pattern;
+
+    if (Array.isArray(sourceRelativePaths)) rels = sourceRelativePaths;
+    if (typeof sourceRelativePaths === "string") pat = sourceRelativePaths;
+    if (targetPattern) pat = targetPattern;
+
+    if (actualFiles.length === 0) return;
+
     setLoading(true);
     setError(null);
     try {
-      const data = await apiClient.analyze(ps, pat);
+      const data = await apiClient.webRenameAnalyze(actualFiles, rels, pat);
       setFiles(data.files);
     } catch (err: any) {
       setError(err.message);
@@ -46,21 +70,25 @@ export const useFileRename = () => {
   };
 
   const executeRename = async () => {
-    if (files.length === 0) return;
+    if (files.length === 0 || selectedFiles.length === 0) return;
     setLoading(true);
+    setError(null);
     try {
       const renames = files
         .filter(f => f.original !== f.slugified)
-        .map(f => ({ 
-          original: f.original, 
-          slugified: f.slugified, 
-          base_dir: f.base_dir 
+        .map(f => ({
+          original: f.original,
+          slugified: f.slugified,
+          base_dir: f.base_dir || ""
         }));
 
-      const result = await apiClient.rename(paths[0], renames, outputPath);
-      
-      // Success: Clear state
+      const blob = await apiClient.webRenameExecute(selectedFiles, relativePaths, renames);
+      downloadBlob(blob, "renamed-files.zip");
+
+      const result = { success: selectedFiles.length, errors: [] };
       setPaths([]);
+      setSelectedFiles([]);
+      setRelativePaths([]);
       setFiles([]);
       return result;
     } catch (err: any) {
@@ -70,5 +98,18 @@ export const useFileRename = () => {
     }
   };
 
-  return { paths, setPaths, outputPath, setOutputPath, pattern, setPattern, files, loading, error, browse, analyze, executeRename };
+  return {
+    paths,
+    setPaths,
+    outputPath,
+    setOutputPath,
+    pattern,
+    setPattern,
+    files,
+    loading,
+    error,
+    browse,
+    analyze,
+    executeRename
+  };
 };
