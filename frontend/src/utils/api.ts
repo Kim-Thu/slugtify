@@ -1,58 +1,6 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
 
 export const apiClient = {
-
-  async webRenameAnalyze(files: File[], relativePaths: string[], pattern: string = "{slug}") {
-    const form = new FormData();
-    files.forEach((file) => form.append("files", file));
-    relativePaths.forEach((path) => form.append("relative_paths", path));
-    form.append("pattern", pattern);
-    const res = await fetch(`${API_BASE}/web/rename/analyze`, { method: "POST", body: form });
-    if (!res.ok) throw new Error(await res.text());
-    return res.json();
-  },
-
-  async webRenameExecute(files: File[], relativePaths: string[], renames: any[]) {
-    const form = new FormData();
-    files.forEach((file) => form.append("files", file));
-    relativePaths.forEach((path) => form.append("relative_paths", path));
-    form.append("renames", JSON.stringify(renames));
-    const res = await fetch(`${API_BASE}/web/rename/execute`, { method: "POST", body: form });
-    if (!res.ok) throw new Error(await res.text());
-    return res.blob();
-  },
-
-  async webHtmlAnalyze(files: File[], relativePaths: string[], options: Record<string, any>) {
-    const form = new FormData();
-    files.forEach((file) => form.append("files", file));
-    relativePaths.forEach((path) => form.append("relative_paths", path));
-    form.append("options", JSON.stringify(options));
-    const res = await fetch(`${API_BASE}/web/html/analyze`, { method: "POST", body: form });
-    if (!res.ok) throw new Error(await res.text());
-    return res.json();
-  },
-
-  async webHtmlExecute(files: File[], relativePaths: string[], options: Record<string, any>) {
-    const form = new FormData();
-    files.forEach((file) => form.append("files", file));
-    relativePaths.forEach((path) => form.append("relative_paths", path));
-    form.append("options", JSON.stringify(options));
-    const res = await fetch(`${API_BASE}/web/html/execute`, { method: "POST", body: form });
-    if (!res.ok) throw new Error(await res.text());
-    return res.blob();
-  },
-
-  async webImageConvert(files: File[], relativePaths: string[], targetFormat: string, quality: number = 85) {
-    const form = new FormData();
-    files.forEach((file) => form.append("files", file));
-    relativePaths.forEach((path) => form.append("relative_paths", path));
-    form.append("target_format", targetFormat);
-    form.append("quality", quality.toString());
-    const res = await fetch(`${API_BASE}/web/image/convert`, { method: "POST", body: form });
-    if (!res.ok) throw new Error(await res.text());
-    return res.blob();
-  },
-
   async browse(mode: "folder" | "files" = "folder") {
     const res = await fetch(`${API_BASE}/browse?mode=${mode}`);
     return res.json();
