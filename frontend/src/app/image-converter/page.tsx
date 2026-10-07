@@ -15,6 +15,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import toast from "react-hot-toast";
 
 type AnyFileHandle = any;
 type AnyDirectoryHandle = any;
@@ -174,6 +175,26 @@ export default function ImageConverterPage() {
     return result;
   };
 
+  const ensureReadWritePermission = async (handle: any) => {
+    if (!handle) return false;
+
+    try {
+      if (typeof handle.queryPermission === "function") {
+        const current = await handle.queryPermission({ mode: "readwrite" });
+        if (current === "granted") return true;
+      }
+
+      if (typeof handle.requestPermission === "function") {
+        const requested = await handle.requestPermission({ mode: "readwrite" });
+        return requested === "granted";
+      }
+
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   const ensureSupportedBrowser = () => {
     const w = window as any;
     if (!w.showDirectoryPicker || !w.showOpenFilePicker) {
@@ -190,17 +211,41 @@ export default function ImageConverterPage() {
     setMessage("");
     try {
       const w = ensureSupportedBrowser();
-      const dir = await w.showDirectoryPicker({ mode: "readwrite" });
+      const dir = await w.showDirectoryPicker({
+        mode: "readwrite",
+        id: "image-converter-source",
+        startIn: "pictures",
+      });
+
+      const granted = await ensureReadWritePermission(dir);
+      if (!granted) {
+        throw new Error(
+          vi
+            ? "Trình duyệt chưa cấp quyền đọc/ghi cho thư mục nguồn."
+            : "Read/write permission was not granted for the source folder."
+        );
+      }
+
       const selected = await scanDirectory(dir, recursive);
       setSourceDir(dir);
       setOutputDir(null);
       setItems(selected);
       buildPreview(selected);
       if (!selected.length) {
-        setMessage(vi ? "Không tìm thấy ảnh được hỗ trợ." : "No supported images found.");
+        const text = vi ? "Không tìm thấy ảnh được hỗ trợ." : "No supported images found.";
+        setMessage(text);
+        toast.error(text);
+      } else {
+        toast.success(
+          vi ? `Đã tìm thấy ${selected.length} ảnh.` : `Found ${selected.length} images.`
+        );
       }
     } catch (error: any) {
-      if (error?.name !== "AbortError") setMessage(error?.message || String(error));
+      if (error?.name !== "AbortError") {
+        const text = error?.message || String(error);
+        setMessage(text);
+        toast.error(text);
+      }
     }
   };
 
@@ -228,8 +273,27 @@ export default function ImageConverterPage() {
       setSourceDir(null);
       setItems(selected);
       buildPreview(selected);
+
+      if (selected.length) {
+        toast.success(
+          vi ? `Đã chọn ${selected.length} ảnh.` : `Selected ${selected.length} images.`
+        );
+      }
+
+      if (!outputDir) {
+        toast(
+          vi
+            ? "Khi chọn từng file, hãy chọn thư mục đích trước khi chuyển đổi."
+            : "When selecting individual files, choose an output folder before converting.",
+          { icon: "📁" }
+        );
+      }
     } catch (error: any) {
-      if (error?.name !== "AbortError") setMessage(error?.message || String(error));
+      if (error?.name !== "AbortError") {
+        const text = error?.message || String(error);
+        setMessage(text);
+        toast.error(text);
+      }
     }
   };
 
@@ -237,10 +301,35 @@ export default function ImageConverterPage() {
     setMessage("");
     try {
       const w = ensureSupportedBrowser();
-      const dir = await w.showDirectoryPicker({ mode: "readwrite" });
+      const dir = await w.showDirectoryPicker({
+        mode: "readwrite",
+        id: "image-converter-output",
+        startIn: "downloads",
+      });
+
+      const granted = await ensureReadWritePermission(dir);
+      if (!granted) {
+        throw new Error(
+          vi
+            ? "Trình duyệt chưa cấp quyền ghi vào thư mục này. Hãy chọn lại và cho phép quyền đọc/ghi."
+            : "Write permission was not granted for this folder. Choose it again and allow read/write access."
+        );
+      }
+
       setOutputDir(dir);
+      toast.success(
+        vi ? `Đã chọn thư mục đích: ${dir.name}` : `Output folder selected: ${dir.name}`
+      );
     } catch (error: any) {
-      if (error?.name !== "AbortError") setMessage(error?.message || String(error));
+      const text =
+        error?.name === "AbortError"
+          ? (vi
+              ? "Đã hủy chọn thư mục hoặc trình duyệt không cấp quyền cho thư mục đó."
+              : "Folder selection was cancelled or the browser did not grant access to that folder.")
+          : (error?.message || String(error));
+
+      setMessage(text);
+      toast.error(text);
     }
   };
 
@@ -379,11 +468,18 @@ export default function ImageConverterPage() {
         }
       }
 
-      setMessage(
+      const summary =
         vi
           ? `Hoàn tất ${success}/${items.length} ảnh. Đã xóa ảnh gốc: ${deleted}. Bỏ qua: ${skipped}. Lỗi: ${errors}.`
-          : `Completed ${success}/${items.length} images. Deleted originals: ${deleted}. Skipped: ${skipped}. Errors: ${errors}.`
-      );
+          : `Completed ${success}/${items.length} images. Deleted originals: ${deleted}. Skipped: ${skipped}. Errors: ${errors}.`;
+
+      setMessage(summary);
+
+      if (errors > 0) {
+        toast.error(summary);
+      } else {
+        toast.success(summary);
+      }
     } finally {
       setLoading(false);
     }
