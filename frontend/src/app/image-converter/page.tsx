@@ -299,6 +299,14 @@ export default function ImageConverterPage() {
 
   const chooseOutput = async () => {
     setMessage("");
+
+    toast(
+      vi
+        ? "Hãy chọn hoặc tạo một thư mục con, ví dụ Downloads/SlugifyMaster. Chrome/Edge có thể chặn thư mục hệ thống hoặc thư mục gốc."
+        : "Choose or create a subfolder such as Downloads/SlugifyMaster. Chrome/Edge may block system or root folders.",
+      { icon: "📁", duration: 5000 }
+    );
+
     try {
       const w = ensureSupportedBrowser();
       const dir = await w.showDirectoryPicker({
@@ -311,8 +319,8 @@ export default function ImageConverterPage() {
       if (!granted) {
         throw new Error(
           vi
-            ? "Trình duyệt chưa cấp quyền ghi vào thư mục này. Hãy chọn lại và cho phép quyền đọc/ghi."
-            : "Write permission was not granted for this folder. Choose it again and allow read/write access."
+            ? "Trình duyệt chưa cấp quyền ghi vào thư mục này. Hãy chọn một thư mục con khác và cho phép quyền đọc/ghi."
+            : "Write permission was not granted. Choose a different subfolder and allow read/write access."
         );
       }
 
@@ -324,8 +332,8 @@ export default function ImageConverterPage() {
       const text =
         error?.name === "AbortError"
           ? (vi
-              ? "Đã hủy chọn thư mục hoặc trình duyệt không cấp quyền cho thư mục đó."
-              : "Folder selection was cancelled or the browser did not grant access to that folder.")
+              ? "Không chọn được thư mục này. Nếu Chrome/Edge báo thư mục hệ thống, hãy tạo/chọn một thư mục con như Downloads/SlugifyMaster."
+              : "This folder cannot be selected. If Chrome/Edge reports a system folder, create/select a subfolder such as Downloads/SlugifyMaster.")
           : (error?.message || String(error));
 
       setMessage(text);
@@ -679,13 +687,18 @@ export default function ImageConverterPage() {
             <input
               readOnly
               value={outputDir?.name || ""}
-              placeholder={vi ? "Để trống: ghi cạnh file gốc khi có quyền" : "Empty: write beside source when permitted"}
+              placeholder={vi ? "Ví dụ: Downloads/SlugifyMaster" : "Example: Downloads/SlugifyMaster"}
               className="min-w-0 flex-1 bg-transparent px-3 text-xs font-mono outline-none"
             />
             <button onClick={chooseOutput} className="h-9 px-4 rounded-lg bg-blue-600 hover:bg-blue-500 text-xs font-bold transition-colors">
-              {vi ? "Chọn đích" : "Browse"}
+              {vi ? "Chọn thư mục con" : "Choose subfolder"}
             </button>
           </div>
+          <p className="text-[11px] leading-5 text-gray-500">
+            {vi
+              ? "Chrome/Edge không cho website ghi trực tiếp vào một số thư mục hệ thống hoặc thư mục gốc. Hãy chọn/tạo thư mục con, ví dụ Downloads/SlugifyMaster."
+              : "Chrome/Edge blocks direct write access to some system or root folders. Choose/create a subfolder, for example Downloads/SlugifyMaster."}
+          </p>
         </div>
 
         <div className="flex flex-wrap items-start gap-x-7 gap-y-4">
