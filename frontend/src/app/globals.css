@@ -115,3 +115,18 @@ body {
   flex-direction: column !important;
   height: 100% !important;
 }
+
+
+@keyframes route-loading {
+    0% {
+        transform: translateX(-120%);
+        width: 30%;
+    }
+    50% {
+        width: 45%;
+    }
+    100% {
+        transform: translateX(340%);
+        width: 30%;
+    }
+}
